@@ -1,0 +1,86 @@
+import subprocess
+import os
+import shutil
+import collections
+# ffmpeg -i vinput.mp4 -acodec pcm_s16le -ac 1 -ar 16000 output1.wav 
+# ffmpeg -ss %startAt -t %captureTime -i in.wav out.wav
+# java -Xmx2024m -jar ./LIUM_SpkDiarization-8.4.1.jar  --fInputMask=./output2.wav --sOutputMask=./output2.seg --doCEClustering  output2
+# pocketsphinx_continuous -infile  > output.txt
+videosDir = "videos"
+wavFilesPATH = "/home/abdoo/Desktop/testProject/wavFiles/"
+segmentsInfoPATH = "./wavFiles-segInfo/"
+segmentsPATH = "./wavFiles-seg/"
+outputTextPATH = "./outputText/"
+candidateTagsPATH = "./candidateTags/"
+segPathArr = []
+
+############### CLEAR ALL TEMP DIRECTORIES ####################
+# for root,subDirs,files in os.walk(segmentsPATH):
+# 	for f in files:
+# 		os.unlink(os.path.join(root, f))
+# 	for d in subDirs:
+# 		shutil.rmtree(os.path.join(root, d))
+
+# for root,subDirs,files in os.walk(wavFilesPATH):
+# 	for f in files:		
+# 		os.unlink(os.path.join(root, f))
+# for root,subDirs,files in os.walk(segmentsInfoPATH):
+# 	for f in files:		
+# 		os.unlink(os.path.join(root, f))
+print 'Temporary Folders & Files Cleared !!!'
+############## Helper Methods ##################
+def segmentAudio(file,wavFile,segID):
+	for line in file:
+		if line.startswith(";"): # a commented line in LIUM segmentation File
+			continue
+		fields = line.strip().split() # fields[2]: segment starts At, fields[3]: Length of Segment
+		startAt = str(float(fields[2])/100)
+		length = str(float(fields[3])/100)
+		segmentProcess = subprocess.Popen(['ffmpeg','-ss',startAt,'-t',length,'-i',wavFilesPATH+wavFile,wavFile[:-4]+'/'+wavFile+'_seg_'+str(segID)+'.wav'],cwd=segmentsPATH)		
+		segID+=1
+		segmentProcess.communicate()[0]
+
+################### Return Least Occurred String ########################### (INCOMPLETE)
+def countOccurrences(string,fileName):
+	text_file = open(candidateTagsPATH+fileName+'.txt', "w")
+	tags = collections.Counter(string.split()).most_common()[-1]
+	text_file.write(str(tags))
+	text_file.close()
+############## END OF HELPERS ######################
+
+################ SCRIPT BEGIN #########################
+
+# for root,subDirs,files in os.walk(videosDir):
+# 	for file in files:
+# 		extWavProcess = subprocess.Popen(['ffmpeg','-i','%s' %(file),'-acodec','pcm_s16le','-ac','1','-ar','16000','%s' %(wavFilesPATH+file+'.wav')],cwd=videosDir)
+# 		extWavProcess.communicate()[0] # exit the current subprocess
+# print "DONE With Wav Extraction!!!"
+print "Extracting Segmentation Info ..."
+for root,subDirs,files in os.walk(wavFilesPATH):
+	for file in files:
+		subprocess.call(['java','-Xmx2024m','-jar','./LIUM_SpkDiarization-8.4.1.jar','--fInputMask','%s' %(wavFilesPATH+file),'--sOutputMask','%s' %(segmentsInfoPATH+file+'.seg'),'--doCEClustering','file'])
+		
+for root,subDirs,files in os.walk(segmentsInfoPATH):
+ 	for file in files:
+ 		full_path = os.path.join(segmentsInfoPATH, file)
+ 		wavFileName = str(file)[:-4]
+ 		print 'Segmenting ' + file + '...............'
+ 		segID = 0 # initialy 0
+ 		os.makedirs(segmentsPATH+wavFileName[:-4])
+ 		segPathArr.append(wavFileName[:-4])
+ 		segmentAudio(open(full_path),wavFileName,segID)
+print 'Segments Created !!!'
+print 'Extracting Words ....'
+print segPathArr
+for sub in segPathArr:
+	for root,subDirs,files in os.walk(segmentsPATH+sub):
+		for file in files:
+			extWordProcess = subprocess.Popen('pocketsphinx_continuous -infile %s >> %s' %(segmentsPATH+sub+'/'+file,outputTextPATH+sub+'.txt'),shell=True)
+			extWordProcess.communicate()[0]
+for root,subDirs,files in os.walk(outputTextPATH):
+	for file in files:
+		with open(outputTextPATH+file, 'r') as myfile:
+			data=myfile.read().replace('\n', '')
+			countOccurrences(data,file)
+print 'DONE !!!'
+print 'Check the CandidateTags Folder For Output'
